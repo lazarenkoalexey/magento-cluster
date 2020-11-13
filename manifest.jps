@@ -256,6 +256,8 @@ actions:
       settings:
         customDomains: ${globals.DOMAIN}
         fallbackToX1: true
+        webroot: true
+        webrootPath: "/var/www/webroot/ROOT"
 
   setup-LE-domain:
     - cmd[bl]: source /opt/letsencrypt/settings && echo $domain
