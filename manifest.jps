@@ -14,7 +14,7 @@ categories:
 name: Auto-Scalable Magento Cluster
 logo: /images/magento.png
 
-baseUrl: https://raw.githubusercontent.com/jelastic-jps/magento-cluster/v2.0.0
+baseUrl: https://raw.githubusercontent.com/lazarenkoalexey/magento-cluster/JE-55952
 
 onBeforeInit: /scripts/settings.js?_r=${fn.random}
 onBeforeInstall: /scripts/beforeinstall.js?_r=${fn.random}
@@ -106,6 +106,11 @@ onAfterScaleOut[nodeGroup:cp]:
     - setNodeDisplayName [${@i.id}]: AppServer
     - setupCP:
         nodeId: ${@i.id}
+    - cmd[${@i.id}]: 
+      commands: |-
+        grep -q master /etc/hosts echo '${nodes.cp.master.address} master' >> /etc/hosts
+        jem service restart
+      user: root
         
 onAfterRedeployContainer[cp]:
   - setupCP:
@@ -153,6 +158,7 @@ onAfterMigrate:
     envName: ${event.response.env.envName}
       
 onInstall:
+  - setupLEwebroot
         
   - script: ${baseUrl}/scripts/idna.js
   - setGlobals:
@@ -200,6 +206,14 @@ onInstall:
           PROTOCOL: https
           
   - install-magento
+  
+  - if (/litespeed/.test("${nodes.cp.nodeType}")):
+    - cmd [${nodes.cp.master.id}]: grep -q "well-known/acme-challenge" /var/www/webroot/ROOT/.htaccess || { echo 'RewriteCond %{REQUEST_URI} .well-known/acme-challenge' >> /var/www/webroot/ROOT/.htaccess && echo 'RewriteRule (.*) ${nodes.cp.master.url}/$1 [R,L]' >> /var/www/webroot/ROOT/.htaccess; }
+  - cmd[cp]: 
+      commands: |-
+        echo '${nodes.cp.master.address} master' >> /etc/hosts
+        jem service restart
+      user: root
 
   - if (${settings.le-addon:false}): 
       - install-LE-addon
@@ -251,7 +265,7 @@ actions:
 
   install-LE-addon:
     - install: https://github.com/jelastic-jps/lets-encrypt/blob/master/manifest.jps?_r=${fn.random}
-      nodeGroup: bl
+      nodeGroup: cp
       skipEmail: true
       settings:
         customDomains: ${globals.DOMAIN}
@@ -260,7 +274,7 @@ actions:
         webrootPath: "/var/www/webroot/ROOT"
 
   setup-LE-domain:
-    - cmd[bl]: source /opt/letsencrypt/settings && echo $domain
+    - cmd[cp]: source /opt/letsencrypt/settings && echo $domain
     - install: ${baseUrl}/scripts/setupDomain.jps
       settings:
         domain: https://${response.out}
@@ -301,7 +315,7 @@ actions:
 
   setupCP:
     - log: App Server Optimization
-    - install: https://raw.githubusercontent.com/jelastic/templates/master/config.jps?_r=${fn.random}
+    - install: https://raw.githubusercontent.com/lazarenkoalexey/templates/master/config.jps?_r=${fn.random}
       settings:
         targetGroup: cp
         targetNodes: ${this.nodeId}
@@ -322,6 +336,13 @@ actions:
           cmd[${this.nodeId}]:
             - jem balancer addCommonHost -h ${@i.intIP}
             - sudo service varnish reload &>> /var/log/run.log
+
+  setupLEwebroot:
+    - cmd[cp,bl]: |-
+        [ ! -d /var/lib/jelastic/keys/letsencrypt ] && mkdir -p /var/lib/jelastic/keys/letsencrypt;
+        echo "webroot=true" > /var/lib/jelastic/keys/letsencrypt/settings-custom;
+        echo "webrootPath=/var/www/webroot/ROOT" >> /var/lib/jelastic/keys/letsencrypt/settings-custom;
+      user: root
    
 success:
   email: success/email/success-${globals.STACK}-${globals.EMAIL}.md?_r=${fn.random}
